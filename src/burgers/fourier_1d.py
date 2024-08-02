@@ -18,7 +18,7 @@ from functools import partial
 from timeit import default_timer
 from utilities3 import *
 import scipy
-
+from time import perf_counter
 # torch.manual_seed(0)
 # np.random.seed(0)
 
@@ -163,7 +163,7 @@ def FNO_main(train_data_res, save_index):
     ################################################################
     
     # Data is of the shape (number of samples, grid size)
-    dataloader = MatReader('burgers_data_R10.mat')
+    dataloader = MatReader('../../data/burgers_data_R10.mat')
     x_data = dataloader.read_field('a')[:,::sub]
     y_data = dataloader.read_field('u')[:,::sub]
     
@@ -207,6 +207,7 @@ def FNO_main(train_data_res, save_index):
     for ep in range(epochs):
         model.train()
         t1 = default_timer()
+        train_t1 = time.perf_counter()
         train_mse = 0
         train_l2 = 0
         for x, y in train_loader:
@@ -225,9 +226,11 @@ def FNO_main(train_data_res, save_index):
             optimizer.step()
             train_mse += mse.item()
             train_l2 += l2.item()
-    
+        train_time = time.perf_counter() - train_t1
+
         scheduler.step()
         model.eval()
+        eval_t1 = time.perf_counter()
         test_l2 = 0.0
         with torch.no_grad():
             for x, y in test_loader:
@@ -235,7 +238,8 @@ def FNO_main(train_data_res, save_index):
                 out = model(x)
                 # out = y_normalizer.decode(out.view(batch_size, -1))
                 test_l2 += myloss(out.view(batch_size, -1), y.view(batch_size, -1)).item()
-    
+        eval_time = perf_counter() - eval_t1
+
         train_mse /= len(train_loader)
         train_l2 /= ntrain
         test_l2 /= ntest
@@ -243,6 +247,8 @@ def FNO_main(train_data_res, save_index):
         t2 = default_timer()
         print("Epoch: %d, time: %.3f, Train Loss: %.3e, Train l2: %.4f, Test l2: %.4f" 
                   % ( ep, t2-t1, train_mse, train_l2, test_l2) )
+        print("Epoch: %d, secs per epoch: %.4f,  eval time: %.4f"
+                  % ( ep, train_time, eval_time) )
         # print(ep, t2-t1, train_mse, train_l2, test_l2)
     
     elapsed = time.time() - start_time
