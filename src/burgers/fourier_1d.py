@@ -18,7 +18,6 @@ from functools import partial
 from timeit import default_timer
 from utilities3 import *
 import scipy
-from time import perf_counter
 # torch.manual_seed(0)
 # np.random.seed(0)
 
@@ -203,6 +202,8 @@ def FNO_main(train_data_res, save_index):
     
     start_time = time.time()
     myloss = LpLoss(size_average=False)
+    train_times = []
+    eval_times = []
     # y_normalizer.cuda()
     for ep in range(epochs):
         model.train()
@@ -238,7 +239,7 @@ def FNO_main(train_data_res, save_index):
                 out = model(x)
                 # out = y_normalizer.decode(out.view(batch_size, -1))
                 test_l2 += myloss(out.view(batch_size, -1), y.view(batch_size, -1)).item()
-        eval_time = perf_counter() - eval_t1
+        eval_time = time.perf_counter() - eval_t1
 
         train_mse /= len(train_loader)
         train_l2 /= ntrain
@@ -250,7 +251,13 @@ def FNO_main(train_data_res, save_index):
         print("Epoch: %d, secs per epoch: %.4f,  eval time: %.4f"
                   % ( ep, train_time, eval_time) )
         # print(ep, t2-t1, train_mse, train_l2, test_l2)
-    
+        train_times.append(train_time)
+        eval_times.append(eval_time)
+
+        if ep % 99 == 0:
+            print(torch.tensor(train_times).mean())
+            print(torch.tensor(eval_times).mean())
+            
     elapsed = time.time() - start_time
     print("\n=============================")
     print("Training done...")

@@ -240,9 +240,13 @@ def FNO_main(save_index):
     
     train_loss = np.zeros((epochs, 1))
     test_loss = np.zeros((epochs, 1))
+    train_times = []
+    eval_times = []
+
     for ep in range(epochs):
         model.train()
         t1 = default_timer()
+        train_t1 = time.perf_counter()
         train_mse = 0
         
         for x, y in train_loader:
@@ -253,25 +257,27 @@ def FNO_main(save_index):
             loss.backward()
             optimizer.step()
             train_mse += loss.item()        
-        
+        train_time = time.perf_counter() - train_t1
         scheduler.step()
         model.eval() 
         
         train_L2 = 0
+        eval_t1 = time.perf_counter()
         with torch.no_grad():
             for x, y in train_loader_L2:
                 x, y = x.cuda(), y.cuda() 
                 out = model(x)
                 l2 = myloss(out.view(ntrain, -1), y.view(ntrain, -1)) 
                 train_L2 += l2.item() 
-                
+          
         test_L2 = 0.0
+        eval_t1 = time.perf_counter()
         with torch.no_grad():
             for x, y in test_loader:
                 x, y = x.cuda(), y.cuda()
                 out = model(x)
                 test_L2 += myloss(out.view(batch_size, -1), y.view(batch_size, -1)).item()
-                
+        eval_time = time.perf_counter() - eval_t1      
         train_mse /= len(train_loader)
         train_L2 /= ntrain
         test_L2 /= ntest
@@ -281,7 +287,15 @@ def FNO_main(save_index):
         t2 = default_timer()
 
         print("Epoch: %d, time: %.3f, Train Loss: %.3e, Train l2: %.4f, Test l2: %.4f" % ( ep, t2-t1, train_mse, train_L2, test_L2))
-          
+        print("Epoch: %d, secs per epoch: %.4f,  eval time: %.4f"
+                  % ( ep, train_time, eval_time) )
+        train_times.append(train_time)
+        eval_times.append(eval_time)
+
+        if ep % 99 == 0:
+            print(torch.tensor(train_times).mean())
+            print(torch.tensor(eval_times).mean())
+            
     elapsed = time.time() - start_time
     print("\n=============================")
     print("Training done...")

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-
+import time
 import matplotlib.pyplot as plt
 
 import operator
@@ -211,9 +211,12 @@ def FNO_main(train_data_res, save_index):
     start_time = default_timer()
     myloss = LpLoss(size_average=False)
     y_normalizer.cuda()
+    train_times = []
+    eval_times = []
     for ep in range(epochs):
         model.train()
         t1 = default_timer()
+        train_t1 = time.perf_counter()
         train_l2 = 0
         train_mse = 0
         for x, y in train_loader:
@@ -234,10 +237,11 @@ def FNO_main(train_data_res, save_index):
             optimizer.step()
             train_mse += mse.item()
             train_l2 += loss.item()
-    
+        train_time = time.perf_counter() - train_t1
         scheduler.step()
     
         model.eval()
+        eval_t1 = time.perf_counter()
         test_l2 = 0.0
         with torch.no_grad():
             for x, y in test_loader:
@@ -245,7 +249,7 @@ def FNO_main(train_data_res, save_index):
                 out = model(x).reshape(batch_size, s, s)
                 out = y_normalizer.decode(out)
                 test_l2 += myloss(out.view(batch_size,-1), y.view(batch_size,-1)).item()
-    
+        eval_time = time.perf_counter() - eval_t1
         train_mse /= len(train_loader)
         train_l2/= ntrain
         test_l2 /= ntest
@@ -254,7 +258,14 @@ def FNO_main(train_data_res, save_index):
         # print(ep, t2-t1, train_l2, test_l2)
         print("Epoch: %d, time: %.3f, Train Loss: %.3e, Train l2: %.4f, Test l2: %.4f" 
                   % ( ep, t2-t1, train_mse, train_l2, test_l2) )
-
+        print("Epoch: %d, secs per epoch: %.4f,  eval time: %.4f"
+                  % ( ep, train_time, eval_time) )
+        
+        train_times.append(train_time)
+        eval_times.append(eval_time)
+        if ep % 99 == 0:
+            print(torch.tensor(train_times).mean())
+            print(torch.tensor(eval_times).mean())
     elapsed = default_timer() - start_time
     print("\n=============================")
     print("Training done...")
