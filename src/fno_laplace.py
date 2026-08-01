@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 
-from torch_laplace import gaussian_mnll, hutchinson_hessian_diag, interval_coverage_metrics, parameter_mb, rel_l2, sampled_weights
+from torch_laplace import gaussian_mnll, hutchinson_hessian_diag, interval_coverage_metrics, parameter_l2, parameter_mb, rel_l2, sampled_weights
 
 
 class UnitGaussianNormalizer:
@@ -182,7 +182,7 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=20)
     p.add_argument("--test-batch-size", type=int, default=100)
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--weight-decay", type=float, default=1e-4)
+    p.add_argument("--weight-decay", type=float, default=0.0, help="Deprecated; use --prior-precision for the MAP Gaussian prior.")
     p.add_argument("--step-size", type=int, default=100)
     p.add_argument("--gamma", type=float, default=0.5)
     p.add_argument("--modes", type=int, default=16)
@@ -190,9 +190,11 @@ def parse_args():
     p.add_argument("--depth", type=int, default=4)
     p.add_argument("--proj-dim", type=int, default=128)
     p.add_argument("--laplace-samples", type=int, default=50)
-    p.add_argument("--laplace-prior-precision", type=float, default=1.0)
+    p.add_argument("--prior-precision", "--laplace-prior-precision", dest="prior_precision", type=float, default=100.0)
     p.add_argument("--laplace-scale", type=float, default=1.0)
-    p.add_argument("--laplace-max-std", type=float, default=1.0)
+    p.add_argument("--laplace-max-std", type=float, default=1e6)
+    p.add_argument("--laplace-damping", type=float, default=1e-6)
+    p.add_argument("--likelihood-noise", type=float, default=1.0, help="Initial scalar likelihood noise; trained as one log-noise parameter.")
     p.add_argument("--laplace-noise", type=float, default=1e-6)
     p.add_argument("--coverage-levels", type=float, nargs="*", default=[0.9, 0.95, 0.99])
     p.add_argument("--hessian-batches", type=int, default=10)
@@ -217,21 +219,41 @@ def evaluate(model, loader, y_normalizer, device):
     return float(rel_l2(pred, target)), pred, target
 
 
-def laplace_eval(model, train_loader, test_loader, y_normalizer, device, args):
+def likelihood_noise(log_noise):
+    return torch.exp(log_noise)
+
+
+def map_loss(pred, target, model, log_noise, total_train_scalars, args):
+    noise = likelihood_noise(log_noise)
+    data_loss = 0.5 * F.mse_loss(pred, target) / noise.square() + log_noise
+    prior_loss = 0.5 * args.prior_precision * parameter_l2(model) / total_train_scalars
+    return data_loss + prior_loss, data_loss, prior_loss
+
+
+def decoded_likelihood_noise(log_noise, y_normalizer):
+    noise = likelihood_noise(log_noise).detach().cpu()
+    return float(noise * y_normalizer.std.detach().cpu().mean())
+
+
+def laplace_eval(model, log_noise, train_loader, test_loader, y_normalizer, device, args, num_train_batches):
+    noise = likelihood_noise(log_noise).detach()
+
     def hessian_loss(batch):
         x, y = batch
-        return F.mse_loss(model(x.to(device)), y.to(device))
+        return 0.5 * F.mse_loss(model(x.to(device)), y.to(device), reduction="sum") / noise.square()
 
-    diag = hutchinson_hessian_diag(model, hessian_loss, train_loader, args.hessian_batches, args.hessian_probes)
+    diag = hutchinson_hessian_diag(model, hessian_loss, train_loader, args.hessian_batches, args.hessian_probes, scale=num_train_batches)
     samples, target = [], None
     for _ in range(args.laplace_samples):
-        with sampled_weights(model, diag, args.laplace_prior_precision, args.laplace_scale, args.laplace_max_std):
+        with sampled_weights(model, diag, args.prior_precision, args.laplace_scale, args.laplace_max_std, args.laplace_damping):
             _, pred, target = evaluate(model, test_loader, y_normalizer, device)
         samples.append(pred.reshape(-1))
     pred_samples = torch.stack(samples)
     target = target.reshape(-1)
-    mnll, _, var = gaussian_mnll(pred_samples, target, args.laplace_noise)
-    coverage = interval_coverage_metrics(pred_samples, target, args.laplace_noise, args.coverage_levels)
+    obs_noise = decoded_likelihood_noise(log_noise, y_normalizer)
+    eval_noise = float(torch.sqrt(torch.tensor(obs_noise**2 + args.laplace_noise**2)))
+    mnll, _, var = gaussian_mnll(pred_samples, target, eval_noise)
+    coverage = interval_coverage_metrics(pred_samples, target, eval_noise, args.coverage_levels)
     return float(mnll), float(var.mean()), float(var.sqrt().mean()), coverage
 
 
@@ -259,9 +281,12 @@ def main():
 
     train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(xtr_aug, ytr_encoded), batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(xte_aug, yte_t), batch_size=args.test_batch_size, shuffle=False)
+    total_train_scalars = ytr_encoded.numel()
+    num_train_batches = len(train_loader)
     model_cls = FNO1d if dim == 1 else FNO2d
     model = model_cls(xtr_aug.shape[-1], args.modes, args.width, args.depth, args.proj_dim).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    log_noise = torch.nn.Parameter(torch.tensor(np.log(args.likelihood_noise), dtype=torch.float32, device=device))
+    optimizer = torch.optim.Adam(list(model.parameters()) + [log_noise], lr=args.lr, weight_decay=0.0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
     mb = parameter_mb(model)
     print(f"param_mb: {mb:.4f}")
@@ -270,20 +295,23 @@ def main():
     for epoch in range(1, args.epochs + 1):
         model.train()
         t0 = time.perf_counter()
-        losses = []
+        losses, data_losses, prior_losses = [], [], []
         for x, y in train_loader:
             optimizer.zero_grad()
-            loss = F.mse_loss(model(x.to(device)), y.to(device))
+            loss, data_loss, prior_loss = map_loss(model(x.to(device)), y.to(device), model, log_noise, total_train_scalars, args)
             loss.backward()
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
+            data_losses.append(float(data_loss.detach().cpu()))
+            prior_losses.append(float(prior_loss.detach().cpu()))
         scheduler.step()
         train_s = time.perf_counter() - t0
 
         if epoch % args.eval_every == 0 or epoch == args.epochs:
             test_rel2, _, _ = evaluate(model, test_loader, y_norm, device)
-            mnll, var_mean, std_mean, coverage = laplace_eval(model, train_loader, test_loader, y_norm, device, args)
-            log = {"epoch": epoch, "train_mse": float(np.mean(losses)), "test_rel2": test_rel2, "laplace_mnll": mnll, "laplace_var_mean": var_mean, "laplace_std_mean": std_mean, "train_s": train_s, "param_mb": mb}
+            mnll, var_mean, std_mean, coverage = laplace_eval(model, log_noise, train_loader, test_loader, y_norm, device, args, num_train_batches)
+            noise_value = float(likelihood_noise(log_noise).detach().cpu())
+            log = {"epoch": epoch, "train_map_loss": float(np.mean(losses)), "train_data_loss": float(np.mean(data_losses)), "train_prior_loss": float(np.mean(prior_losses)), "likelihood_noise": noise_value, "log_likelihood_noise": float(log_noise.detach().cpu()), "test_rel2": test_rel2, "laplace_mnll": mnll, "laplace_var_mean": var_mean, "laplace_std_mean": std_mean, "train_s": train_s, "param_mb": mb}
             log.update(coverage)
             print(log)
             wandb.log(log, step=epoch)

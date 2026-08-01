@@ -34,14 +34,16 @@ ee=50
 samples=50
 hbatch=10
 hprobes=4
-prior=1.0
-maxstd=1.0
+prior=100.0
+maxstd=1000000.0
+init_noise=1.0
+damping=1e-6
 
 depth=4; width=64; modes=16; proj=128; batch=20; tbatch=100; lr=0.001
-sp "python -u fno_laplace.py --dataset=burgers --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --laplace-prior-precision=$prior --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=burgers_fno_laplace" 8
+sp "python -u fno_laplace.py --dataset=burgers --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --prior-precision=$prior --likelihood-noise=$init_noise --laplace-damping=$damping --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=burgers_fno_laplace" 8
 
 depth=4; width=32; modes=12; proj=128; batch=20; tbatch=100; lr=0.001
-sp "python -u fno_laplace.py --dataset=darcy --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --laplace-prior-precision=$prior --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=darcy_fno_laplace" 8
+sp "python -u fno_laplace.py --dataset=darcy --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --prior-precision=$prior --likelihood-noise=$init_noise --laplace-damping=$damping --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=darcy_fno_laplace" 8
 
 depth=4; width=64; modes=32; proj=128; batch=20; tbatch=100; lr=0.001
-sp "python -u fno_laplace.py --dataset=beijing --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --laplace-prior-precision=$prior --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=beijing_fno_laplace" 8
+sp "python -u fno_laplace.py --dataset=beijing --data-dir=$data --epochs=$epochs --eval-every=$ee --batch-size=$batch --test-batch-size=$tbatch --lr=$lr --depth=$depth --width=$width --modes=$modes --proj-dim=$proj --laplace-samples=$samples --hessian-batches=$hbatch --hessian-probes=$hprobes --prior-precision=$prior --likelihood-noise=$init_noise --laplace-damping=$damping --laplace-max-std=$maxstd --wandb --wandb-project=$project --name=beijing_fno_laplace" 8

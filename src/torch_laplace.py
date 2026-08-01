@@ -12,6 +12,16 @@ def parameter_mb(model):
     return total / 1024**2
 
 
+def parameter_l2(model):
+    total = None
+    for p in model.parameters():
+        if not p.requires_grad:
+            continue
+        value = p.abs().square().sum() if p.is_complex() else p.square().sum()
+        total = value if total is None else total + value
+    return total
+
+
 def rel_l2(pred, target):
     pred = pred.reshape(pred.shape[0], -1)
     target = target.reshape(target.shape[0], -1)
@@ -40,7 +50,7 @@ def interval_coverage_metrics(pred_samples, target, noise=1e-6, levels=(0.9, 0.9
     return metrics
 
 
-def hutchinson_hessian_diag(model, loss_fn, loader, batches, probes):
+def hutchinson_hessian_diag(model, loss_fn, loader, batches, probes, scale=1.0):
     was_training = model.training
     model.eval()
     params = [p for p in model.parameters() if p.requires_grad]
@@ -65,18 +75,18 @@ def hutchinson_hessian_diag(model, loss_fn, loader, batches, probes):
     if count == 0:
         raise ValueError("no batches used for Hessian diagonal")
     for d in diag:
-        d.div_(count)
+        d.mul_(scale / count)
     model.train(was_training)
     return diag
 
 
 @contextlib.contextmanager
-def sampled_weights(model, diag, prior_precision=1.0, scale=1.0, max_std=1.0):
+def sampled_weights(model, diag, prior_precision=1.0, scale=1.0, max_std=1.0, damping=0.0):
     params = [p for p in model.parameters() if p.requires_grad]
     base = [p.detach().clone() for p in params]
     with torch.no_grad():
         for p, b, d in zip(params, base, diag):
-            precision = d.clamp_min(0.0) + prior_precision
+            precision = d.clamp_min(0.0) + prior_precision + damping
             std = scale / torch.sqrt(precision).clamp_min(1e-12)
             noise = _normal_like(p, std)
             p.copy_(b + noise * std.clamp_max(max_std))
