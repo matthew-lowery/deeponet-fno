@@ -2,3 +2,5 @@
 __pycache__/
 datasets/car.npz
 results/car_dse_fno/
+output/
+wandb/

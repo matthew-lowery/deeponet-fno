@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/camlab-ethz/DSE-for-NeuralOperators",
+  "commit": "27fdbfc647cf6c124994ec8ec69393c1eb9d6011",
+  "file": "Elasticity/fno_dse.py",
+  "original_sha256": "a45a5ae09ae9ef7d275e66487a73254b0e3c13211c775f3c375b91329010dbba",
+  "local_changes": [
+    "Extract the VFT constructor in FNO_dse.forward into an overridable make_transform method."
+  ],
+  "car_adapter": "../../dse_fno.py"
+}
