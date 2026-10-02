@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python="${PYTHON_BIN:-$(command -v python3)}"
+python="${PYTHON_BIN:-/u/mlowery/.conda/envs/gnot/bin/python3}"
 mkdir -p "$root/output"
 
 for seed in 1 2 3; do
